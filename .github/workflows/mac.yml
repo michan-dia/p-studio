@@ -1,0 +1,56 @@
+# P-STUDIO の Mac 版を作る
+# 公開する.bat が、新しい版の Release に「mac-source.zip(材料)」を置いてから、これを動かす。
+# できた Mac 版(.dmg と .zip)を同じ Release に足して、材料は消す。
+name: Mac版を作る
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'バージョンのタグ(例: v1.0.1)'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  mac:
+    runs-on: macos-latest
+    timeout-minutes: 90
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      TAG: ${{ inputs.tag }}
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+    steps:
+      - name: 材料をダウンロード
+        run: |
+          gh release download "$TAG" -R "$GITHUB_REPOSITORY" -p mac-source.zip
+          mkdir src
+          ditto -x -k mac-source.zip src
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: FaceStock などの Mac 版を作る
+        working-directory: src
+        run: node scripts/build-mac-apps.js
+
+      - name: P-STUDIO の Mac 版を作る
+        working-directory: src
+        run: |
+          npm install --no-audit --no-fund
+          npx electron-builder --mac --arm64 --publish never
+
+      - name: Release に足す
+        working-directory: src/dist
+        run: |
+          gh release upload "$TAG" *.dmg *-mac.zip -R "$GITHUB_REPOSITORY" --clobber
+
+      - name: 材料を消す
+        if: always()
+        run: gh release delete-asset "$TAG" mac-source.zip -R "$GITHUB_REPOSITORY" -y || true
